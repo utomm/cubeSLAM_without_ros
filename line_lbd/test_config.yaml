@@ -1,0 +1,6 @@
+%YAML 1.0
+image_path: "./line_lbd/data/cabinet.png"
+save_folder: "./line_lbd/data"
+use_LSD_algorithm: true
+save_to_imgs: false
+save_to_txts: false
