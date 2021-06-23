@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "thread"
+#include "atomic"
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -175,7 +176,7 @@ class Viewer
 		World = Sophus::SE3d::trans((*nine).head(3)).matrix() * cache.matrix() * World;
 		glPushMatrix();
 		glMultMatrixd(World.data());
-		DrawUnitCube();
+		DrawUnitCube(0.8, 0.6, 0.4);
 		glPopMatrix();
 	}
 	void DrawAllTruthCamera()
@@ -199,6 +200,100 @@ class Viewer
 	{
 		camera_truth = make_shared<Eigen::MatrixXd>(truth_frame_poses);
 	}
+	void SetAllPredCamera(vector<tracking_frame*>& pred_frame_poses)
+	{
+		camera_pred = make_shared<vector<tracking_frame*>>(pred_frame_poses);
+	}
+	void DrawAllPredCamera()
+	{
+		if (frame_now < 0)
+			return;
+
+		Sophus::SE3d cam_pose
+			((*camera_pred)[frame_now]->cam_pose_Twc.rotation(), (*camera_pred)[frame_now]->cam_pose_Twc.translation());
+
+		//Eigen::Isometry3d RT;
+		//RT.rotate(R);
+		//RT.translate(pos);
+		//int count = 0;
+		glPushMatrix();
+		//std::vector<GLdouble> Twc = { R(0, 0), R(1, 0), R(2, 0), 0.,
+		//							  R(0, 1), R(1, 1), R(2, 1), 0.,
+		//							  R(0, 2), R(1, 2), R(2, 2), 0.,
+		//							  pos.x(), pos.y(), pos.z(), 1. };
+		//auto test_a = Twc.data();
+		//auto test_b = R.transpose().data();
+
+		glMultMatrixd(cam_pose.matrix().data());
+		// 绘制相机坐标系
+
+		glLineWidth(3);
+		glBegin(GL_LINES);
+		glColor3f(1.0f, 0.f, 0.f);
+		glVertex3f(0, 0, 0);
+		glVertex3f(1, 0, 0);
+		glColor3f(0.f, 1.0f, 0.f);
+		glVertex3f(0, 0, 0);
+		glVertex3f(0, 1, 0);
+		glColor3f(0.f, 0.f, 1.f);
+		glVertex3f(0, 0, 0);
+		glVertex3f(0, 0, 1);
+		glEnd();
+
+
+
+
+		// 绘制相机轮廓线
+
+
+
+		const float w = 0.2;
+		const float h = w * 0.75;
+		const float z = w * 0.6;
+
+		glLineWidth(2);
+		glBegin(GL_LINES);
+		glColor3f(0.0f, 1.0f, 1.0f);
+		glVertex3f(0, 0, 0);
+		glVertex3f(w, h, z);
+		glVertex3f(0, 0, 0);
+		glVertex3f(w, -h, z);
+		glVertex3f(0, 0, 0);
+		glVertex3f(-w, -h, z);
+		glVertex3f(0, 0, 0);
+		glVertex3f(-w, h, z);
+		glVertex3f(w, h, z);
+		glVertex3f(w, -h, z);
+		glVertex3f(-w, h, z);
+		glVertex3f(-w, -h, z);
+		glVertex3f(-w, h, z);
+		glVertex3f(w, h, z);
+		glVertex3f(-w, -h, z);
+		glVertex3f(w, -h, z);
+		glEnd();
+		glPopMatrix();
+
+		//0,-1,0)) because camera y is down;
+
+
+		//auto cache = pangolin::OpenGlMatrix::ColMajor4x4(Twc.data());
+		//s_cam_.Follow(cache,true);
+
+		// -------- 绘制相机轨迹 --------//
+		glLineWidth(2);
+		glBegin(GL_LINES);
+		glColor3f(0.f, 1.f, 0.f);
+		for (int i = 0; i < frame_now - 1; i++)
+		{
+			glVertex3d((*camera_pred)[i]->cam_pose_Twc.translation().x(),
+				(*camera_pred)[i]->cam_pose_Twc.translation().y(),
+				(*camera_pred)[i]->cam_pose_Twc.translation().z());
+			glVertex3d((*camera_pred)[i + 1]->cam_pose_Twc.translation().x(),
+				(*camera_pred)[i + 1]->cam_pose_Twc.translation().y(),
+				(*camera_pred)[i + 1]->cam_pose_Twc.translation().z());
+		}
+		glEnd();
+	}
 	void Run()
 	{
 		if (LoadTrueCloud() == -1)
@@ -211,7 +306,7 @@ class Viewer
 
 		pangolin::OpenGlRenderState s_cam_ = pangolin::OpenGlRenderState(
 			pangolin::ProjectionMatrix(752 * 2, 480 * 2, 420, 420, 752, 480, 0.1, 1000),
-			pangolin::ModelViewLookAt(0, 0, -5, 0, 0, 0, 0, 1, 0)
+			pangolin::ModelViewLookAt(5, 5, -5, 0, 0, 0, 1, 0, 1)
 		);
 
 		pangolin::View& d_cam_ = pangolin::CreateDisplay()
@@ -227,6 +322,8 @@ class Viewer
 			DrawPointCLoud();
 			DrawAllTruthCamera();
 			Draw9DoFCube();
+			DrawEachCube();
+			DrawAllPredCamera();
 			pangolin::FinishFrame();
 			if (pangolin::ShouldQuit())
 				break;
@@ -240,12 +337,55 @@ class Viewer
 		});
 		mtDraw.detach();
 	}
+	void AppendCubes(Vector9d cube)
+	{
+		cubes.push_back(cube);
+	}
+	void DrawEachCube()
+	{
+		if (frame_now < 0)
+			return;
+		auto nine = cubes.begin() + frame_now;
+		Sophus::SE3d cache = Sophus::SE3d::rotY((*nine)(3));
+		//scale - y - x - z -trans
+		cache = Sophus::SE3d::rotX((*nine)(4)) * cache;
+		cache = Sophus::SE3d::rotZ((*nine)(5)) * cache;
+		Eigen::Matrix4d World;
+		World(0, 0) = (*nine)(6) * 2;
+		World(0, 1) = 0.0;
+		World(0, 2) = 0.0;
+		World(0, 3) = 0.0;
+		World(1, 0) = 0.0;
+		World(1, 1) = (*nine)(7) * 2;
+		World(1, 2) = 0.0;
+		World(1, 3) = 0.0;
+		World(2, 0) = 0.0;
+		World(2, 1) = 0.0;
+		World(2, 2) = (*nine)(8) * 2;
+		World(2, 3) = 0.0;
+		World(3, 0) = 0.0;
+		World(3, 1) = 0.0;
+		World(3, 2) = 0.0;
+		World(3, 3) = 1.0;
+		World = Sophus::SE3d::trans((*nine).head(3)).matrix() * cache.matrix() * World;
+		glPushMatrix();
+		glMultMatrixd(World.data());
+		DrawUnitCube();
+		glPopMatrix();
+	}
+	void SetFrameNum(int n)
+	{
+		frame_now = n;
+	}
  private:
 	vector<pcl::PointXYZRGB, aligned_allocator<pcl::PointXYZRGB>> mPoints;
 	string pcd_dir;
 	thread mtDraw;
 	shared_ptr<Eigen::MatrixXd> camera_truth;
+	shared_ptr<vector<tracking_frame*>> camera_pred;
 	int total_frame_number = 0;
+	atomic<int> frame_now = -1;
+	vector<Vector9d, Eigen::aligned_allocator<Vector9d>> cubes;
 	shared_ptr<Matrix<double, 9, 1>> nine;
  public:
 	void SetNine(Vector9d nineSetter)
@@ -413,6 +553,7 @@ void publish_to_viewer(std::vector<tracking_frame*> all_frames, std::vector<obje
 	int total_frame_number = all_frames.size();
 	viewer.SetTotalFrameNumber(total_frame_number);
 	viewer.SetAllTruthCamera(truth_frame_poses);
+	viewer.SetAllPredCamera(all_frames);
 	// prepare all paths messages.
 //	geometry_msgs::PoseArray all_pred_pose_array;
 //	std::vector<nav_msgs::Odometry> all_pred_pose_odoms;
@@ -500,6 +641,7 @@ void publish_to_viewer(std::vector<tracking_frame*> all_frames, std::vector<obje
 //
 //	visualization_msgs::MarkerArray
 //		finalcube_markers = cuboids_to_marker(cube_landmarks_history.back(), Vector3d(0, 1, 0));
+	// final cube marker
 	auto temp = cube_landmarks_history.back()->cube_vertex->estimate();
 	viewer.SetNine(temp.toMinimalVector());
 
@@ -551,14 +693,19 @@ void publish_to_viewer(std::vector<tracking_frame*> all_frames, std::vector<obje
 //			out_image.encoding = sensor_msgs::image_encodings::TYPE_8UC3;
 //			pub_2d_cuboid_project.publish(out_image.toImageMsg());
 			}
-			cube_landmarks_history[frame_number]->cube_vertex->estimate().toMinimalVector();
+			viewer.SetFrameNum(frame_number);
+			if (all_frame_rawcubes[frame_number])
+				viewer.AppendCubes(all_frame_rawcubes[frame_number]->cube_vertex->estimate().toMinimalVector());
+			else
+				viewer.AppendCubes(Vector9d::Zero());
 			// transform it to local ground plane.... suitable for matlab processing.
 		}
 
 		if (frame_number == int(all_frames.size()))
 		{
 			cout << "Finish all visulialization!" << endl;
-			break;
+			cv::waitKey();
+			frame_number = 0;
 		}
 
 		cv::waitKey(500);
