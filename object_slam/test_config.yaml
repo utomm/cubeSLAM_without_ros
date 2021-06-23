@@ -1,4 +1,4 @@
 %YAML 1.0
-base_folder: "./object_slam/data"
-online_detect_mode: true
-save_results_to_txt: false
+base_folder: "./object_slam/data/"
+online_detect_mode: 1
+save_results_to_txt: 0

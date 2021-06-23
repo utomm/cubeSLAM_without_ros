@@ -15,11 +15,16 @@ project(object_slam)
 #)
 
 ## System dependencies are found with CMake's conventions
-#find_package(Boost REQUIRED COMPONENTS system)
+# find_package(Boost REQUIRED COMPONENTS system)
 find_package(Eigen3 REQUIRED)
-set(CMAKE_PREFIX_PATH "/home/hu/install/lib/cmake/opencv4")
-find_package(OpenCV 4.0 REQUIRED)
+# set(CMAKE_PREFIX_PATH "/home/hu/install/lib/cmake/opencv4")
+find_package(OpenCV REQUIRED)
+# find_package(OpenCV 4.0 REQUIRED PATHS "/home/hu/install/lib/cmake/opencv4")
 find_package(PCL REQUIRED)
+
+find_package(Pangolin REQUIRED)
+
+find_package(Sophus REQUIRED)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -56,6 +61,8 @@ include_directories(
         ${Eigen_INCLUDE_DIRS}
         ${OpenCV_INCLUDE_DIRS}
         ${PCL_INCLUDE_DIRS}
+        ${Pangolin_INCLUDE_DIRS}
+        ${Sophus_INCLUDE_DIRS}
 )
 
 
@@ -87,6 +94,8 @@ target_link_libraries(object_slam_node PUBLIC
         detect_3d_cuboid
         ${OpenCV_LIBRARIES} ${PCL_LIBRARIES}
         ${PROJECT_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
+        ${Pangolin_LIBRARY}
+        Sophus::Sophus
         )
 
 

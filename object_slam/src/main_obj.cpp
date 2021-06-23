@@ -5,9 +5,13 @@
 #include <ctime>
 #include <algorithm>
 
+#include "thread"
+
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
+#include <pangolin/pangolin.h>
+#include "sophus/geometry.hpp"
 // ros headers
 //#include <ros/ros.h>
 //#include <ros/package.h>
@@ -26,6 +30,8 @@
 
 #include <pcl/PCLPointCloud2.h>
 #include <pcl/filters/approximate_voxel_grid.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/point_types.h>
 
 #include "Thirdparty/g2o/g2o/core/block_solver.h"
 #include "Thirdparty/g2o/g2o/core/optimization_algorithm_levenberg.h"
@@ -53,8 +59,209 @@ bool online_detect_mode;
 bool save_results_to_txt;
 cv::Mat_<float> matx_to3d_, maty_to3d_;
 
+class Viewer
+{
+ public:
+	Viewer(const string& pcdDir) : pcd_dir(pcdDir)
+	{
+	}
+	virtual ~Viewer()
+	{
+
+	}
+	void printPCD()
+	{
+		cout << pcd_dir << endl;
+	}
+	int LoadTrueCloud()
+	{
+		pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+		if (pcl::io::loadPCDFile<pcl::PointXYZRGB>(
+			pcd_dir, *cloud)
+			== -1) //* 读入PCD格式的文件，如果文件不存在，返回-1
+		{
+			PCL_ERROR("Couldn't read file test_pcd.pcd \n"); //文件不存在时，返回错误，终止程序。
+			return (-1);
+		}
+		mPoints = cloud->points;
+		return 0;
+	}
+	void DrawPointCLoud()
+	{
+		glPointSize(3);
+		glBegin(GL_POINTS);
+		for (auto& p: mPoints)
+		{
+			glColor3d(p.r / 255.0, p.g / 255.0, p.b / 255.0);
+			glVertex3d(p.x, p.y, p.z);
+		}
+		glEnd();
+	}
+	void DrawAxis()
+	{
+		glLineWidth(3);
+		glBegin(GL_LINES);
+		glColor3f(1.0f, 0.f, 0.f);
+		glVertex3f(0, 0, 0);
+		glVertex3f(1, 0, 0);
+		glColor3f(0.f, 1.0f, 0.f);
+		glVertex3f(0, 0, 0);
+		glVertex3f(0, 1, 0);
+		glColor3f(0.f, 0.f, 1.f);
+		glVertex3f(0, 0, 0);
+		glVertex3f(0, 0, 1);
+		glEnd();
+	}
+	void DrawUnitCube(float rollR = 1., float rollG = 0., float rollB = 0.)
+	{
+		const GLfloat l = -0.5f;
+		const GLfloat h = 0.5f;
+		const GLfloat verts[] = {
+			l, h, h, h, h, h, l, h, l, h, h, l,  // TOP
+			l, l, h, h, l, h, l, l, l, h, l, l   // BOTTOM x y z
+		};
+		glLineWidth(3);
+		glBegin(GL_LINES);
+		// draw 4 x
+		glColor3f(rollR, rollG, rollB);
+		for (int i = 0; i < 4; ++i)
+		{
+			glVertex3f(verts[2 * i * 3], verts[2 * i * 3 + 1], verts[2 * i * 3 + 2]);
+			glVertex3f(verts[(2 * i + 1) * 3], verts[(2 * i + 1) * 3 + 1], verts[(2 * i + 1) * 3 + 2]);
+		}
+		// draw 4 y
+		glColor3f(rollB, rollR, rollG);
+		for (int i = 0; i < 4; ++i)
+		{
+			glVertex3f(verts[i * 3], verts[i * 3 + 1], verts[i * 3 + 2]);
+			glVertex3f(verts[(i + 4) * 3], verts[(i + 4) * 3 + 1], verts[(i + 4) * 3 + 2]);
+		}
+		//draw 4 z
+		glColor3f(rollG, rollB, rollR);
+		for (int i = 0; i < 2; ++i)
+		{
+			glVertex3f(verts[i * 3], verts[i * 3 + 1], verts[i * 3 + 2]);
+			glVertex3f(verts[(i + 2) * 3], verts[(i + 2) * 3 + 1], verts[(i + 2) * 3 + 2]);
+			glVertex3f(verts[(i + 4) * 3], verts[(i + 4) * 3 + 1], verts[(i + 4) * 3 + 2]);
+			glVertex3f(verts[(i + 4 + 2) * 3], verts[(i + 4 + 2) * 3 + 1], verts[(i + 4 + 2) * 3 + 2]);
+		}
+		glEnd();
+	}
+	void Draw9DoFCube()
+	{
+		if (nine == nullptr)
+			return;
+		Sophus::SE3d cache = Sophus::SE3d::rotY((*nine)(3));
+		//scale - y - x - z -trans
+		cache = Sophus::SE3d::rotX((*nine)(4)) * cache;
+		cache = Sophus::SE3d::rotZ((*nine)(5)) * cache;
+		Eigen::Matrix4d World;
+		World(0, 0) = (*nine)(6) * 2;
+		World(0, 1) = 0.0;
+		World(0, 2) = 0.0;
+		World(0, 3) = 0.0;
+		World(1, 0) = 0.0;
+		World(1, 1) = (*nine)(7) * 2;
+		World(1, 2) = 0.0;
+		World(1, 3) = 0.0;
+		World(2, 0) = 0.0;
+		World(2, 1) = 0.0;
+		World(2, 2) = (*nine)(8) * 2;
+		World(2, 3) = 0.0;
+		World(3, 0) = 0.0;
+		World(3, 1) = 0.0;
+		World(3, 2) = 0.0;
+		World(3, 3) = 1.0;
+		World = Sophus::SE3d::trans((*nine).head(3)).matrix() * cache.matrix() * World;
+		glPushMatrix();
+		glMultMatrixd(World.data());
+		DrawUnitCube();
+		glPopMatrix();
+	}
+	void DrawAllTruthCamera()
+	{
+		if (camera_truth == nullptr)
+			return;
+		else if ((*camera_truth).rows() > 0)
+		{
+			glLineWidth(2);
+			glBegin(GL_LINES);
+			glColor3f(0.f, 1.f, 0.f);
+			for (int i = 0; i < total_frame_number - 1; i++)
+			{
+				glVertex3d((*camera_truth)(i, 1), (*camera_truth)(i, 2), (*camera_truth)(i, 3));
+				glVertex3d((*camera_truth)(i + 1, 1), (*camera_truth)(i + 1, 2), (*camera_truth)(i + 1, 3));
+			}
+			glEnd();
+		}
+	}
+	void SetAllTruthCamera(Eigen::MatrixXd& truth_frame_poses)
+	{
+		camera_truth = make_shared<Eigen::MatrixXd>(truth_frame_poses);
+	}
+	void Run()
+	{
+		if (LoadTrueCloud() == -1)
+		{
+			cout << "error loading truth point cloud !" << endl;
+			return;
+		}
+		pangolin::CreateWindowAndBind("cube_vis", 752 * 2, 480 * 2);
+		glEnable(GL_DEPTH_TEST);
+
+		pangolin::OpenGlRenderState s_cam_ = pangolin::OpenGlRenderState(
+			pangolin::ProjectionMatrix(752 * 2, 480 * 2, 420, 420, 752, 480, 0.1, 1000),
+			pangolin::ModelViewLookAt(0, 0, -5, 0, 0, 0, 0, 1, 0)
+		);
+
+		pangolin::View& d_cam_ = pangolin::CreateDisplay()
+			.SetBounds(0., 1., 0., 1., -752 / 480.)
+			.SetHandler(new pangolin::Handler3D(s_cam_));
+		while (true)
+		{
+			// ========================== 一系列常规操作 ================================== //
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+			glClearColor(1, 1, 1, 1);
+			d_cam_.Activate(s_cam_);
+			DrawAxis();
+			DrawPointCLoud();
+			DrawAllTruthCamera();
+			Draw9DoFCube();
+			pangolin::FinishFrame();
+			if (pangolin::ShouldQuit())
+				break;
+		}
+	}
+	void BeginTread()
+	{
+		mtDraw = thread([this]()
+		{
+		  this->Run();
+		});
+		mtDraw.detach();
+	}
+ private:
+	vector<pcl::PointXYZRGB, aligned_allocator<pcl::PointXYZRGB>> mPoints;
+	string pcd_dir;
+	thread mtDraw;
+	shared_ptr<Eigen::MatrixXd> camera_truth;
+	int total_frame_number = 0;
+	shared_ptr<Matrix<double, 9, 1>> nine;
+ public:
+	void SetNine(Vector9d nineSetter)
+	{
+		Viewer::nine = make_shared<Matrix<double, 9, 1>>(nineSetter);
+	}
+ public:
+
+	void SetTotalFrameNumber(int totalFrameNumber)
+	{
+		total_frame_number = totalFrameNumber;
+	}
+
+};
 // for converting depth image to point cloud.
-void set_up_calibration(const Eigen::Matrix3f& calibration_mat, const int im_height, const int im_width)
+/*void set_up_calibration(const Eigen::Matrix3f& calibration_mat, const int im_height, const int im_width)
 {
 	matx_to3d_.create(im_height, im_width);
 	maty_to3d_.create(im_height, im_width);
@@ -70,10 +277,10 @@ void set_up_calibration(const Eigen::Matrix3f& calibration_mat, const int im_hei
 			maty_to3d_(v, u) = (v - center_y) * fy_inv;
 		}
 	}
-}
+}*/
 
 // depth img is already in m unit.
-void depth_to_cloud(const cv::Mat& rgb_img,
+/*void depth_to_cloud(const cv::Mat& rgb_img,
 	const cv::Mat& depth_img,
 	const Eigen::Matrix4f transToWorld,
 	CloudXYZRGB::Ptr& point_cloud,
@@ -114,7 +321,7 @@ void depth_to_cloud(const cv::Mat& rgb_img,
 		vox_grid_.setInputCloud(point_cloud);
 		vox_grid_.filter(*point_cloud);
 	}
-}
+}*/
 
 /*
 // one cuboid need front and back markers...
@@ -197,9 +404,169 @@ nav_msgs::Odometry posenode_to_odommsgs(const g2o::SE3Quat& pose_Twc, const std_
 	return odom_msg;
 }
 
+
+ */
 // publish every frame's raw and optimized results
-void publish_all_poses(std::vector<tracking_frame*> all_frames, std::vector<object_landmark*> cube_landmarks_history,
-std::vector<object_landmark*> all_frame_rawcubes, Eigen::MatrixXd& truth_frame_poses)
+void publish_to_viewer(std::vector<tracking_frame*> all_frames, std::vector<object_landmark*> cube_landmarks_history,
+	std::vector<object_landmark*> all_frame_rawcubes, Eigen::MatrixXd& truth_frame_poses, Viewer& viewer)
+{
+	int total_frame_number = all_frames.size();
+	viewer.SetTotalFrameNumber(total_frame_number);
+	viewer.SetAllTruthCamera(truth_frame_poses);
+	// prepare all paths messages.
+//	geometry_msgs::PoseArray all_pred_pose_array;
+//	std::vector<nav_msgs::Odometry> all_pred_pose_odoms;
+//	geometry_msgs::PoseArray all_truth_pose_array;
+//	std::vector<nav_msgs::Odometry> all_truth_pose_odoms;
+//	nav_msgs::Path path_truths, path_preds;
+//	std_msgs::Header pose_header;
+//	pose_header.frame_id = "/world";
+//	pose_header.stamp = ros::Time::now();
+//	path_preds.header = pose_header;
+//	path_truths.header = pose_header;
+//	for (int i = 0; i < total_frame_number; i++)
+//	{
+//		all_pred_pose_array.poses.push_back(posenode_to_geomsgs(all_frames[i]->cam_pose_Twc));
+//		all_pred_pose_odoms.push_back(posenode_to_odommsgs(all_frames[i]->cam_pose_Twc, pose_header));
+//
+//		geometry_msgs::PoseStamped postamp;
+//		postamp.pose = posenode_to_geomsgs(all_frames[i]->cam_pose_Twc);
+//		postamp.header = pose_header;
+//		path_preds.poses.push_back(postamp);
+//	}
+//	if (truth_frame_poses.rows() > 0)
+//	{
+//		for (int i = 0; i < total_frame_number; i++)
+//		{
+//			geometry_msgs::Pose pose_msg;
+//			pose_msg.position.x = truth_frame_poses(i, 1);
+//			pose_msg.position.y = truth_frame_poses(i, 2);
+//			pose_msg.position.z = truth_frame_poses(i, 3);
+//			pose_msg.orientation.x = truth_frame_poses(i, 4);
+//			pose_msg.orientation.y = truth_frame_poses(i, 5);
+//			pose_msg.orientation.z = truth_frame_poses(i, 6);
+//			pose_msg.orientation.w = truth_frame_poses(i, 7);
+//			all_truth_pose_array.poses.push_back(pose_msg);
+//			nav_msgs::Odometry odom_msg;
+//			odom_msg.pose.pose = pose_msg;
+//			odom_msg.header = pose_header;
+//			all_truth_pose_odoms.push_back(odom_msg);
+//
+//			geometry_msgs::PoseStamped postamp;
+//			postamp.pose = pose_msg;
+//			postamp.header = pose_header;
+//			path_truths.poses.push_back(postamp);
+//		}
+//	}
+//	all_pred_pose_array.header.stamp = ros::Time::now();
+//	all_pred_pose_array.header.frame_id = "/world";
+//	all_truth_pose_array.header.stamp = ros::Time::now();
+//	all_truth_pose_array.header.frame_id = "/world";
+
+	if (save_results_to_txt)  // record cam pose and object pose
+	{
+		ofstream resultsFile;
+		string resultsPath = base_folder + "output_cam_poses.txt";
+		cout << "resultsPath  " << resultsPath << endl;
+		resultsFile.open(resultsPath.c_str());
+		resultsFile << "# timestamp tx ty tz qx qy qz qw" << "\n";
+		for (int i = 0; i < total_frame_number; i++)
+		{
+			double time_string = truth_frame_poses(i, 0);
+			resultsFile << time_string << "  ";
+			resultsFile << all_frames[i]->cam_pose_Twc.toVector().transpose() << "\n";
+		}
+		resultsFile.close();
+
+		ofstream objresultsFile;
+		string objresultsPath = base_folder + "output_obj_poses.txt";
+		objresultsFile.open(objresultsPath.c_str());
+		for (size_t j = 0; j < cube_landmarks_history.size(); j++)
+		{
+			g2o::cuboid cube_opti = cube_landmarks_history[j]->cube_vertex->estimate();
+			// transform it to local ground plane.... suitable for matlab processing.
+			objresultsFile << cube_opti.toMinimalVector().transpose() << " " << "\n";
+		}
+		objresultsFile.close();
+	}
+
+	// sensor parameter for TUM cabinet data!
+//	Eigen::Matrix3f calib;
+//	float depth_map_scaling = 5000;
+//	calib << 535.4, 0, 320.1,
+//		0, 539.2, 247.6,
+//		0, 0, 1;
+//	set_up_calibration(calib, 480, 640);
+//
+//	visualization_msgs::MarkerArray
+//		finalcube_markers = cuboids_to_marker(cube_landmarks_history.back(), Vector3d(0, 1, 0));
+	auto temp = cube_landmarks_history.back()->cube_vertex->estimate();
+	viewer.SetNine(temp.toMinimalVector());
+
+	int frame_number = -1;
+	while (true)
+	{
+		frame_number++;
+
+		if (0) // directly show final results
+		{
+//			pub_slam_all_poses.publish(all_pred_pose_array);
+//			pub_truth_all_poses.publish(all_truth_pose_array);
+//			pub_slam_path.publish(path_preds);
+//			pub_truth_path.publish(path_truths);
+		}
+		//pub_final_opti_cube.publish(finalcube_markers);
+
+		if (frame_number < total_frame_number)
+		{
+			// publish cuboid landmarks, after each frame's g2o optimization
+//			if (cube_landmarks_history[frame_number] != nullptr)
+//				pub_history_opti_cube
+//					.publish(cuboids_to_marker(cube_landmarks_history[frame_number], Vector3d(1, 0, 0)));
+//
+//			// publish raw detected cube in each frame, before optimization
+//			if (all_frame_rawcubes.size() > 0 && all_frame_rawcubes[frame_number] != nullptr)
+//				pub_frame_raw_cube.publish(cuboids_to_marker(all_frame_rawcubes[frame_number], Vector3d(0, 0, 1)));
+//
+//			// publish camera pose estimation of this frame
+//			pub_slam_odompose.publish(all_pred_pose_odoms[frame_number]);
+//			pub_truth_odompose.publish(all_truth_pose_odoms[frame_number]);
+
+// 	    std::cout<<"Frame position x/y:   "<<frame_number<<"        "<<all_pred_pose_odoms[frame_number].pose.pose.position.x<<"  "<<
+// 			  all_pred_pose_odoms[frame_number].pose.pose.position.y <<std::endl;
+			if (online_detect_mode)
+			{
+				char frame_index_c[256];
+				sprintf(frame_index_c, "%04d", frame_number);  // format into 4 digit
+
+				cv::Mat cuboid_2d_proj_img = all_frames[frame_number]->cuboids_2d_img;
+				cv::imshow("2d cube", cuboid_2d_proj_img);
+				std::string raw_rgb_img_name = base_folder + "raw_imgs/" + std::string(frame_index_c) + "_rgb_raw.jpg";
+				// cv::Mat raw_rgb_img = cv::imread(raw_rgb_img_name, 1);
+
+
+//			cv_bridge::CvImage out_image;
+//			out_image.header.stamp = ros::Time::now();
+//			out_image.image = cuboid_2d_proj_img;
+//			out_image.encoding = sensor_msgs::image_encodings::TYPE_8UC3;
+//			pub_2d_cuboid_project.publish(out_image.toImageMsg());
+			}
+			cube_landmarks_history[frame_number]->cube_vertex->estimate().toMinimalVector();
+			// transform it to local ground plane.... suitable for matlab processing.
+		}
+
+		if (frame_number == int(all_frames.size()))
+		{
+			cout << "Finish all visulialization!" << endl;
+			break;
+		}
+
+		cv::waitKey(500);
+	}
+}
+
+/*void publish_all_poses(std::vector<tracking_frame*> all_frames, std::vector<object_landmark*> cube_landmarks_history,
+	std::vector<object_landmark*> all_frame_rawcubes, Eigen::MatrixXd& truth_frame_poses)
 {
 	ros::NodeHandle n;
 	ros::Publisher pub_slam_all_poses = n.advertise<geometry_msgs::PoseArray>("/slam_pose_array", 10);
@@ -392,13 +759,13 @@ std::vector<object_landmark*> all_frame_rawcubes, Eigen::MatrixXd& truth_frame_p
 		ros::spinOnce();
 		loop_rate.sleep();
 	}
-}
-*/
+}*/
 
 //NOTE offline_pred_objects and init_frame_poses are not used in online_detect_mode! truth cam pose of first frame is used.
-void incremental_build_graph(Eigen::MatrixXd& offline_pred_frame_objects,
-	Eigen::MatrixXd& init_frame_poses,
-	Eigen::MatrixXd& truth_frame_poses)
+void incremental_build_graph(MatrixXd& offline_pred_frame_objects,
+	MatrixXd& init_frame_poses,
+	MatrixXd& truth_frame_poses,
+	Viewer& viewer)
 {
 	Eigen::Matrix3d calib;
 	calib << 535.4, 0, 320.1,   // for TUM cabinet data.
@@ -449,6 +816,7 @@ void incremental_build_graph(Eigen::MatrixXd& offline_pred_frame_objects,
 
 	// process each frame online and incrementally
 	for (int frame_index = 0; frame_index < total_frame_number; frame_index++)
+		// for (int frame_index = 0; frame_index < 5; frame_index++)
 	{
 		g2o::SE3Quat curr_cam_pose_Twc;
 		g2o::SE3Quat odom_val; // from previous frame to current frame
@@ -515,7 +883,8 @@ void incremental_build_graph(Eigen::MatrixXd& offline_pred_frame_objects,
 			if (has_detected_cuboid)  // prepare object measurement
 			{
 				cuboid* detected_cube = frames_cuboids[0][0];  // NOTE this is a simple dataset, only one landmark
-
+				//cv::imshow("2d Cube", detect_cuboid_obj.cuboids_2d_img);
+				//cv::waitKey(1000);
 				g2o::cuboid cube_ground_value; //cuboid in the local ground frame.
 				Vector9d cube_pose;
 				cube_pose << detected_cube->pos(0), detected_cube->pos(1), detected_cube->pos(2),
@@ -659,16 +1028,20 @@ void incremental_build_graph(Eigen::MatrixXd& offline_pred_frame_objects,
 		}
 		else
 			cube_pose_raw_detected_history[frame_index] = nullptr;
+
+		cout << "optimizing frame:" << frame_index << endl;
 	}
 
 	cout << "Finish all optimization! Begin visualization." << endl;
 
 	// publish_all_poses(all_frames, cube_pose_opti_history, cube_pose_raw_detected_history, truth_frame_poses);
+	publish_to_viewer(all_frames, cube_pose_opti_history, cube_pose_raw_detected_history, truth_frame_poses, viewer);
+	// todo: final optimization is all done before each frame was visualized.
 }
 
 int main(int argc, char* argv[])
 {
-	cv::FileStorage fs2("/home/hu/CLionProjects/cubeSLAM_without_ros/line_lbd/test_config.yaml", cv::FileStorage::READ);
+	cv::FileStorage fs2("object_slam/test_config.yaml", cv::FileStorage::READ);
 	base_folder = (std::string)fs2["base_folder"];
 	online_detect_mode = (int)fs2["online_detect_mode"] != 0;
 	save_results_to_txt = (int)fs2["save_results_to_txt"] != 0;
@@ -688,6 +1061,7 @@ int main(int argc, char* argv[])
 	std::string init_camera_pose = base_folder
 		+ "pop_cam_poses_saved.txt"; // offline camera pose for cuboids detection (x y yaw=0, truth roll/pitch/height)
 	std::string truth_camera_pose = base_folder + "truth_cam_poses.txt";
+	std::string truth_pointcloud = base_folder + "dataset.pcd";
 	Eigen::MatrixXd pred_frame_objects(100, 10);  // 100 is some large row number, each row in txt has 10 numbers
 	Eigen::MatrixXd init_frame_poses(100, 8);
 	Eigen::MatrixXd truth_frame_poses(100, 8);
@@ -701,8 +1075,9 @@ int main(int argc, char* argv[])
 
 	std::cout << "read data size:  " << pred_frame_objects.rows() << "  " << init_frame_poses.rows() << "  "
 			  << truth_frame_poses.rows() << std::endl;
-
-	incremental_build_graph(pred_frame_objects, init_frame_poses, truth_frame_poses);
+	Viewer cube_viewer(truth_pointcloud.data());
+	cube_viewer.BeginTread();
+	incremental_build_graph(pred_frame_objects, init_frame_poses, truth_frame_poses, cube_viewer);
 
 	return 0;
 }
