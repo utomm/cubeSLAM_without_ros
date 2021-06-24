@@ -79,9 +79,9 @@ class Viewer
 		pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 		if (pcl::io::loadPCDFile<pcl::PointXYZRGB>(
 			pcd_dir, *cloud)
-			== -1) //* 读入PCD格式的文件，如果文件不存在，返回-1
+			== -1) //* load PCD
 		{
-			PCL_ERROR("Couldn't read file test_pcd.pcd \n"); //文件不存在时，返回错误，终止程序。
+			PCL_ERROR("Couldn't read file test_pcd.pcd \n"); //
 			return (-1);
 		}
 		mPoints = cloud->points;
@@ -89,11 +89,11 @@ class Viewer
 	}
 	void DrawPointCLoud()
 	{
-		glPointSize(3);
+		glPointSize(0.1);
 		glBegin(GL_POINTS);
 		for (auto& p: mPoints)
 		{
-			glColor3d(p.r / 255.0, p.g / 255.0, p.b / 255.0);
+			glColor4d(p.r / 255.0, p.g / 255.0, p.b / 255.0, 1);
 			glVertex3d(p.x, p.y, p.z);
 		}
 		glEnd();
@@ -202,7 +202,7 @@ class Viewer
 	}
 	void SetAllPredCamera(vector<tracking_frame*>& pred_frame_poses)
 	{
-		camera_pred = make_shared<vector<tracking_frame*>>(pred_frame_poses);
+		camera_pred = make_shared < vector < tracking_frame * >> (pred_frame_poses);
 	}
 	void DrawAllPredCamera()
 	{
@@ -282,7 +282,7 @@ class Viewer
 		// -------- 绘制相机轨迹 --------//
 		glLineWidth(2);
 		glBegin(GL_LINES);
-		glColor3f(0.f, 1.f, 0.f);
+		glColor3f(1.f, 0.f, 1.f);
 		for (int i = 0; i < frame_now - 1; i++)
 		{
 			glVertex3d((*camera_pred)[i]->cam_pose_Twc.translation().x(),
@@ -303,10 +303,11 @@ class Viewer
 		}
 		pangolin::CreateWindowAndBind("cube_vis", 752 * 2, 480 * 2);
 		glEnable(GL_DEPTH_TEST);
+		//glEnable(GL_BLEND);
 
 		pangolin::OpenGlRenderState s_cam_ = pangolin::OpenGlRenderState(
 			pangolin::ProjectionMatrix(752 * 2, 480 * 2, 420, 420, 752, 480, 0.1, 1000),
-			pangolin::ModelViewLookAt(5, 5, -5, 0, 0, 0, 1, 0, 1)
+			pangolin::ModelViewLookAt(-2, -2, 2, 0, 0, 0, 0, 0, 1)
 		);
 
 		pangolin::View& d_cam_ = pangolin::CreateDisplay()
@@ -377,6 +378,15 @@ class Viewer
 	{
 		frame_now = n;
 	}
+	void SetNine(Vector9d nineSetter)
+	{
+		Viewer::nine = make_shared < Matrix < double, 9, 1 >> (nineSetter);
+	}
+
+	void SetTotalFrameNumber(int totalFrameNumber)
+	{
+		total_frame_number = totalFrameNumber;
+	}
  private:
 	vector<pcl::PointXYZRGB, aligned_allocator<pcl::PointXYZRGB>> mPoints;
 	string pcd_dir;
@@ -387,17 +397,6 @@ class Viewer
 	atomic<int> frame_now = -1;
 	vector<Vector9d, Eigen::aligned_allocator<Vector9d>> cubes;
 	shared_ptr<Matrix<double, 9, 1>> nine;
- public:
-	void SetNine(Vector9d nineSetter)
-	{
-		Viewer::nine = make_shared<Matrix<double, 9, 1>>(nineSetter);
-	}
- public:
-
-	void SetTotalFrameNumber(int totalFrameNumber)
-	{
-		total_frame_number = totalFrameNumber;
-	}
 
 };
 // for converting depth image to point cloud.
@@ -708,7 +707,7 @@ void publish_to_viewer(std::vector<tracking_frame*> all_frames, std::vector<obje
 			frame_number = 0;
 		}
 
-		cv::waitKey(500);
+		cv::waitKey(200);
 	}
 }
 
